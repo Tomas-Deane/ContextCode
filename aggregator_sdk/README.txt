@@ -1,0 +1,1 @@
+Everything in this aggregator directory is actually hosted on python anywhere with a mysql database.

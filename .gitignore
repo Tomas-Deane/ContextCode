@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+
+# Distribution / packaging
+build/
+dist/
+.eggs/
+*.egg-info/
+
+# Logs
+*.log
+
+# Compiled or temporary files
+compiled_code.txt
+
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# GUID files
+bitcoin_guid.txt
+eth_dominance_guid.txt
+opensky_guid.txt
+pc_guid.txt

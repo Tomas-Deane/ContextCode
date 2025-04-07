@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dynamic Monitoring Dashboard</title>
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <!-- (Optional) DataTables CSS only if you need it for recent metrics -->
+  <!--
+  <link rel="stylesheet" type="text/css"
+        href="https://cdn.datatables.net/1.10.21/css/dataTables.bootstrap4.min.css"/>
+  -->
+  <style>
+    body { background-color: #f8f9fa; }
+    .navbar { margin-bottom: 20px; }
+    .card { margin-bottom: 20px; }
+    .nav-tabs .nav-link.active { background-color: #007bff; color: #fff; }
+    .pagination-controls { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <!-- Navigation Bar with Dynamic Filters -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <a class="navbar-brand" href="#">Monitoring Dashboard</a>
+    <div class="collapse navbar-collapse">
+      <ul class="navbar-nav ml-auto">
+        <li class="nav-item">
+          <a class="nav-link" href="/dash/">Live Gauges</a>
+        </li>
+        <li class="nav-item">
+          <select id="device-filter" class="form-control">
+            <option value="">All Devices</option>
+          </select>
+        </li>
+        <li class="nav-item ml-2">
+          <select id="metric-filter" class="form-control">
+            <option value="">All Metrics</option>
+          </select>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
+  <button id="open-taskmanager-button" class="btn btn-warning">Open Task Manager</button>
+  <script>
+    document.getElementById('open-taskmanager-button').addEventListener('click', function() {
+      fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device: "Tomas-Laptop",      // Adjust as needed
+          command: "open taskmanager"  // Command your agent recognizes
+        })
+      })
+      .then(response => response.json())
+      .then(data => console.log("Command sent:", data))
+      .catch(error => console.error("Error:", error));
+    });
+  </script>
+
+  <div class="container">
+    <!-- Recent Metrics Section -->
+    <div class="card">
+      <div class="card-header bg-primary text-white">
+        <h4>Recent Metrics</h4>
+      </div>
+      <div class="card-body">
+        <table id="recent-metrics" class="table table-striped table-bordered">
+          <thead>
+            <tr>
+              <th>Device</th>
+              <th>Metric</th>
+              <th>Data</th>
+              <th>Timestamp</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Rows loaded via AJAX -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Historical Metrics Section with Dynamic Tabs -->
+    <ul class="nav nav-tabs" id="metricTabs" role="tablist">
+      <!-- Tabs inserted dynamically -->
+    </ul>
+    <div class="tab-content" id="metricTabsContent">
+      <!-- Tab panes inserted dynamically -->
+    </div>
+  </div>
+
+  <!-- jQuery, Popper.js, Bootstrap JS -->
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
+  <!-- (Optional) DataTables JS only if you need it for the "recent metrics" table -->
+  <!--
+  <script type="text/javascript"
+          src="https://cdn.datatables.net/1.10.21/js/jquery.dataTables.min.js"></script>
+  <script type="text/javascript"
+          src="https://cdn.datatables.net/1.10.21/js/dataTables.bootstrap4.min.js"></script>
+  -->
+
+  <script>
+  $(document).ready(function(){
+      // 1. Load schema to populate filters and build dynamic tabs
+      $.getJSON('/api/schema', function(schema) {
+          const deviceSet = new Set();
+          const metricSet = new Set();
+          let tabsHtml = '';
+          let tabsContentHtml = '';
+
+          // Build sets and dynamic tabs based on schema
+          schema.forEach(function(device) {
+              deviceSet.add(device.friendly_name);
+              device.metrics.forEach(function(metric) {
+                  metricSet.add(metric.name);
+              });
+          });
+
+          // Populate device and metric filters
+          deviceSet.forEach(function(device) {
+              $('#device-filter').append('<option value="'+device+'">'+device+'</option>');
+          });
+          metricSet.forEach(function(metric) {
+              $('#metric-filter').append('<option value="'+metric+'">'+metric+'</option>');
+
+              // Create a valid ID from the metric name
+              let metricId = metric.replace(/\s+/g, '-').toLowerCase();
+              tabsHtml += `
+                <li class="nav-item">
+                  <a class="nav-link" id="${metricId}-tab" data-toggle="tab"
+                     href="#${metricId}" role="tab">${metric}</a>
+                </li>`;
+
+              tabsContentHtml += `
+                <div class="tab-pane fade" id="${metricId}" role="tabpanel">
+                  <table id="${metricId}-table" class="table table-striped table-bordered">
+                    <thead><tr><th>Timestamp</th></tr></thead>
+                    <tbody></tbody>
+                  </table>
+                  <div id="${metricId}-table-pagination" class="pagination-controls"></div>
+                </div>`;
+          });
+
+          $('#metricTabs').html(tabsHtml);
+          $('#metricTabsContent').html(tabsContentHtml);
+
+          // 2. Load recent metrics every 5 seconds
+          loadRecentMetrics();
+          setInterval(loadRecentMetrics, 5000);
+
+          // Reload recent metrics when filters change
+          $('#device-filter, #metric-filter').on('change', function(){
+              loadRecentMetrics();
+          });
+
+          // 3. Load historical data when a tab is activated
+          $('a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
+              let metricName = $(e.target).text().trim();
+              let targetTab = $(e.target).attr('href');
+              // Call function with the table ID, page=1
+              loadHistoricalData(metricName, targetTab + '-table', 1);
+          });
+      });
+
+      // Function to load recent metrics into the table
+      function loadRecentMetrics() {
+          $.getJSON('/api/metrics', function(data) {
+              let deviceFilter = $('#device-filter').val();
+              let metricFilter = $('#metric-filter').val();
+              let tbody = $('#recent-metrics tbody');
+              tbody.empty();
+
+              data.forEach(function(item) {
+                  if ((!deviceFilter || item.device === deviceFilter) &&
+                      (!metricFilter || item.metric === metricFilter)) {
+
+                      let fieldsDisplay = '';
+                      for (let key in item.fields) {
+                          fieldsDisplay += key + ': ' + item.fields[key] + ' ';
+                      }
+                      let row = `
+                        <tr>
+                          <td>${item.device}</td>
+                          <td>${item.metric}</td>
+                          <td>${fieldsDisplay}</td>
+                          <td>${item.timestamp}</td>
+                        </tr>`;
+                      tbody.append(row);
+                  }
+              });
+
+              // (Optional) If you want to apply DataTables to recent metrics
+              // Uncomment below lines once, so you don’t re-initialize repeatedly
+              /*
+              if (!$.fn.DataTable.isDataTable('#recent-metrics')) {
+                  $('#recent-metrics').DataTable();
+              }
+              */
+          });
+      }
+
+      // Function to load historical data for a specific metric with pagination
+      function loadHistoricalData(metricName, tableSelector, page = 1, page_size = 20) {
+          // Identify the metric_id by querying the schema again
+          $.getJSON('/api/schema', function(schema) {
+              let metricId = null;
+              for (let i = 0; i < schema.length; i++){
+                  let device = schema[i];
+                  for (let j = 0; j < device.metrics.length; j++){
+                      if (device.metrics[j].name === metricName){
+                          metricId = device.metrics[j].metric_id;
+                          break;
+                      }
+                  }
+                  if (metricId) break;
+              }
+              if (metricId) {
+                  // Request paginated history
+                  $.getJSON(`/api/history/${metricId}?page=${page}&page_size=${page_size}`, function(data) {
+                      let historyData = data.history;
+                      let tbody = $(tableSelector + ' tbody');
+                      tbody.empty();
+
+                      // Build table header dynamically based on the first record's fields
+                      if (historyData.length > 0) {
+                          let headerRow = '<tr><th>Timestamp</th>';
+                          Object.keys(historyData[0].fields).forEach(function(key) {
+                              headerRow += '<th>' + key + '</th>';
+                          });
+                          headerRow += '</tr>';
+                          $(tableSelector + ' thead').html(headerRow);
+                      }
+                      // Populate rows
+                      historyData.forEach(function(item) {
+                          let row = `<tr><td>${item.timestamp}</td>`;
+                          for (let key in item.fields) {
+                              row += `<td>${item.fields[key]}</td>`;
+                          }
+                          row += '</tr>';
+                          tbody.append(row);
+                      });
+
+                      // Build pagination controls
+                      let paginationDiv = $(tableSelector.replace('table', 'table-pagination'));
+                      paginationDiv.empty();
+                      let currentPage = data.page;
+                      let totalPages = data.pages;
+
+                      if (currentPage > 1) {
+                          paginationDiv.append('<button class="btn btn-sm btn-primary prev-page">Previous</button> ');
+                      }
+                      paginationDiv.append(`<span> Page ${currentPage} of ${totalPages} </span>`);
+                      if (currentPage < totalPages) {
+                          paginationDiv.append(' <button class="btn btn-sm btn-primary next-page">Next</button>');
+                      }
+
+                      // Bind click events to pagination buttons
+                      paginationDiv.find('.prev-page').click(function(){
+                          loadHistoricalData(metricName, tableSelector, currentPage - 1, page_size);
+                      });
+                      paginationDiv.find('.next-page').click(function(){
+                          loadHistoricalData(metricName, tableSelector, currentPage + 1, page_size);
+                      });
+                    });
+              }
+          });
+      }
+  });
+  </script>
+</body>
+</html>
